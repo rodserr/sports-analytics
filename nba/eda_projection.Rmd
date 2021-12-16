@@ -1,0 +1,43 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(skimr)
+
+games_schedule <- read_csv('data/nba/games_schedule.csv') %>% filter(season < 2022)
+games_stats <- read_csv('data/nba/games_stats.csv')
+quarter_results <- read_csv('data/nba/quarter_results.csv')
+seasons_stats <- read_csv('data/nba/Seasons_Stats.csv') %>% janitor::clean_names()
+
+skim(games_schedule)
+skim(games_stats)
+skim(seasons_stats)
+
+
+
+seasons_stats %>% 
+  select(all_of(names(games_stats))) %>% 
+  filter(Year > 2000) %>% 
+  naniar::gg_miss_var(show_pct = T)
+
+```
+
+## Objetivo: Proyeccion del performance del jugador
+
+ejemplo: https://projects.fivethirtyeight.com/2022-nba-player-projections/lebron-james/
+No puedo diferenciar por posicion
+basketball-reference glossary: https://www.basketball-reference.com/about/glossary.html
+
+```{r}
+games_stats %>% 
+  left_join(games_schedule %>% select(id, season), by = 'id') %>% 
+  distinct(season, starters) %>% 
+  count(season)
+
+```

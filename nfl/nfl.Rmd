@@ -1,0 +1,149 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+field description: https://www.kaggle.com/c/nfl-big-data-bowl-2022/data
+
+```{r}
+library(tidyverse)
+library(dtplyr)
+
+plays <- read_csv('data/nfl/plays.csv', col_types = cols(passResult = col_character(), returnerId = col_character()))
+
+skimr::skim(plays)
+
+```
+
+```{r}
+plays %>% count(specialTeamsPlayType)
+```
+
+```{r}
+plays %>% 
+  count(specialTeamsPlayType, specialTeamsResult) %>%
+  group_by(specialTeamsPlayType) %>% 
+  mutate(prop = n/sum(n)) %>% 
+  ggplot(aes(x = reorder(specialTeamsResult, prop), y = prop)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent) +
+  facet_wrap(~specialTeamsPlayType, scales = 'free')
+
+```
+
+```{r}
+plays %>% count(kickerId) %>% na.omit() %>% summary()
+plays %>% count(returnerId) %>% na.omit() %>% summary()
+
+returners <- plays %>% 
+  mutate(trackId = paste(gameId, playId, returnerId)) %>% 
+  group_by(returnerId) %>% 
+  summarise(
+    countReturnYardage = sum(specialTeamsResult == 'Return'),
+    medianReturnYardage = median(kickReturnYardage, na.rm = T), 
+    returnPercentage = sum(specialTeamsResult == 'Return')/n(),
+    trackIds = list(trackId),
+    .groups = 'drop') %>% 
+  filter(countReturnYardage > 30) %>% 
+  na.omit()
+
+returnPlayId <- plays %>%
+  filter(returnerId %in% returners$returnerId, 
+         specialTeamsResult == 'Return') %>% 
+  mutate(trackId = paste(gameId, playId, returnerId)) %>% 
+  pull(trackId)
+```
+
+Returners tracking data
+
+```{r}
+tracking2018 <- read_csv('data/nfl/tracking2018.csv')
+
+trackingReturners <- lazy_dt(tracking2018) %>%
+  filter(paste(gameId, playId, nflId) %in% returnPlayId) %>% 
+  mutate(x = ifelse(playDirection == "left", 120-x, x),
+         y = ifelse(playDirection == "left", 160/3 - y, y)) %>% 
+  as_tibble()
+
+unique(trackingReturners$event)
+
+```
+
+```{r}
+
+library(gganimate)
+tracking2018 %>% 
+  filter(gameId == 2018093004, playId == 3124) %>% 
+  ggplot(aes(x, y, color = team)) +
+  geom_point(alpha = .7, size = 1) +
+  theme(legend.position = 'top', legend.direction = 'horizontal') +
+  transition_time(frameId) +
+  ease_aes('linear')
+
+
+```
+
+Time from kickoff to kick_received
+Time from kickoff to first_contact
+variance in vertical position change
+vertical position change from received to tackle, touchdown
+returnYardage
+reception location
+top speed
+top acceleration
+
+```{r}
+returnerTrackingStats <- trackingReturners %>% #head(1000) %>% 
+  group_by(nflId, gameId, playId) %>% 
+  nest() %>% 
+  mutate(
+    playStats = data %>% map(function(.x){
+      initPlay <- .x %>% filter(event %in% c('kickoff', 'punt'))
+      reception <- .x %>% filter(event %in% c('punt_received', 'kick_received')) %>% slice_min(order_by = time)
+      firstContact <- .x %>% filter(event %in% c('first_contact'))
+      endPlay <- .x %>% filter(event %in% c('tackle', 'touchdown', 'out_of_bounds'))
+      topAcc <- .x %>% slice_max(order_by = a, with_ties = F)
+      
+      list(
+        receptionTime = difftime(reception$time, initPlay$time, units = 'secs'),
+        contactTime = difftime(firstContact$time, reception$time, units = 'secs'),
+        runTime = difftime(endPlay$time, initPlay$time, units = 'secs'),
+        yVariance = sd(.x$y),
+        yVariation = reception$y-endPlay$y,
+        topAcceleration = topAcc$a,
+        topAccelerationTime = difftime(topAcc$time, reception$time, units = 'secs'),
+        receptionX = reception$x,
+        receptionY = reception$y,
+        returnYardage = reception$x-endPlay$y
+      ) %>% map(as.numeric)
+      
+    })
+  ) %>% 
+  ungroup() %>% 
+  select(-data) %>% 
+  unnest_wider(playStats) %>% 
+  mutate(across(where(is.numeric), ~round(.x, 4)))
+
+returnerMedians <- returnerTrackingStats %>% 
+  mutate(returnerId = as.character(nflId)) %>%
+  left_join(plays %>% select(specialTeamsPlayType, returnerId, gameId, playId), by = c('gameId', 'playId', 'returnerId')) %>% 
+  filter(specialTeamsPlayType == 'Kickoff') %>% 
+  group_by(returnerId) %>% 
+  summarise(
+    across(where(is_double), median, na.rm=T),
+    countReturn = n(),
+    countKickoff = sum(specialTeamsPlayType == 'Kickoff'),
+    countPunt = sum(specialTeamsPlayType == 'Punt'),
+    .groups = 'drop') %>% 
+  arrange(returnYardage) %>% filter(countReturn > 9)
+
+bind_rows(
+  returnerMedians %>% slice_max(n = 10, order_by = returnYardage),
+  returnerMedians %>% slice_min(n = 10, order_by = returnYardage)
+) %>% View()
+
+```
+

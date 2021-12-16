@@ -1,0 +1,38 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r}
+library(tidyverse)
+library(StatsBombR)
+```
+
+```{r}
+free_competitions <- FreeCompetitions()
+
+free_matches <- FreeMatches(free_competitions %>% filter(competition_name == 'UEFA Euro'))
+
+free_matches %>% count(competition_stage.name)
+
+data360 <- StatsBombFree360Events(MatchesDF = free_matches %>% filter(match_id == 3795506), Parallel = F)
+
+data_event <- StatsBombFreeEvents(MatchesDF = free_matches %>% filter(match_id == 3795506), Parallel = F)
+
+```
+
+```{r}
+names(data_event)
+data_event %>% filter(id == '0aee931f-9614-4879-b3e8-fd9d7cc80c59')
+
+unique(data_event$type.name)
+
+```
+```{r}
+data_event %>% filter(type.name == 'Starting XI')
+```
+
+
+
